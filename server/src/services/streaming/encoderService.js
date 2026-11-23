@@ -224,14 +224,10 @@ export class EncoderService {
     const canvasW = this.canvasWidth || 1280;
     const canvasH = this.canvasHeight || 720;
 
-    let targetW = Number(bLband.windowWidth) || 960;
     let targetH = Number(bLband.windowHeight) || 540;
-    let targetX = bLband.windowX !== undefined ? Number(bLband.windowX) : 300;
     let targetY = bLband.windowY !== undefined ? Number(bLband.windowY) : 20;
 
-    if (targetW % 2 !== 0) targetW -= 1;
     if (targetH % 2 !== 0) targetH -= 1;
-    if (targetX % 2 !== 0) targetX -= 1;
     if (targetY % 2 !== 0) targetY -= 1;
 
     // Resolve bug dimensions (bug size stays constant as requested)
@@ -402,20 +398,19 @@ export class EncoderService {
     if (isLbandActive) {
       // CASE 1: L-Band is active on air
       // Video is squeezed into cutout window [windowX, windowY, windowWidth, windowHeight]
-      const winX = Number(bLband.windowX !== undefined ? bLband.windowX : 300);
       const winY = Number(bLband.windowY !== undefined ? bLband.windowY : 20);
-      const winW = Number(bLband.windowWidth || 960);
       const winH = Number(bLband.windowHeight || 540);
 
-      targetWidth = Math.round((winW * wp) / 100);
+      // Ticker width is relative to the output frame, not the L-Band video window.
+      targetWidth = Math.round((canvasW * wp) / 100);
       if (targetWidth % 2 !== 0) targetWidth += 1;
-      targetWidth = Math.min(winW, targetWidth);
+      targetWidth = Math.min(canvasW, targetWidth);
 
       const mb = Math.max(0, Math.round((winH * Number(mbPercent || 0)) / 100));
       const videoBottom = winY + winH;
       const bottomOffset = isAshtonActive ? ((Number(bAshton.height) || 160) + mb) : mb;
       yBarExpr = `${videoBottom - activeTickH - bottomOffset}`;
-      xBarExpr = computeBarX(winX, winW, targetWidth);
+      xBarExpr = computeBarX(0, canvasW, targetWidth);
     } else if (isAshtonActive) {
       // CASE 2: Ashton Band is active on air
       // Lower third banner graphic sits at the bottom of the screen (height = ashtonH)
@@ -435,17 +430,8 @@ export class EncoderService {
       xBarExpr = computeBarX(0, canvasW, targetWidth);
     }
 
-    // Text crawling expression:
-    // Small text enters from the visible cropped bar width (targetWidth) so narrow bars don't wait in silence;
-    // longer/repeated text scrolls seamlessly by unitWidth.
-    let xTextExpr;
-    if (meta.isSmallText) {
-      const cw = meta.contentWidth || 'w';
-      xTextExpr = `${targetWidth}-mod(t*${scrollSpeed},${targetWidth}+${cw})`;
-    } else {
-      const u = meta.unitWidth || 350;
-      xTextExpr = `0-mod(t*${scrollSpeed},${u})`;
-    }
+    const unitWidth = Math.max(1, Number(meta.unitWidth) || 350);
+    const xTextExpr = `0-mod(t*${scrollSpeed},${unitWidth})`;
 
     return {
       bar: { x: xBarExpr, y: yBarExpr, width: targetWidth },
@@ -471,6 +457,7 @@ export class EncoderService {
         fontFamily: bTick.fontFamily || 'Arial',
         fontSize: bTick.fontSize || 26,
         widthPercent: bTick.width || 100,
+        canvasWidth: this.canvasWidth,
         paddingY: bTick.paddingY || 12,
         alignment: bTick.alignment || 'center',
         outputPath: this.tickerFile
@@ -651,7 +638,9 @@ export class EncoderService {
       `[0:a]aresample=44100,asetpts=N/SR/TB[aout]`,
       `color=c=black:s=${canvasW}x${canvasH}:r=${fps}[lband_bg]`,
       `color=c=black:s=${canvasW}x${canvasH}:r=${fps}[ashton_bg]`,
-      `[2:v][3:v]overlay@ticktext=x='${tickPos.text.x}':y='${tickPos.text.y}':eval=frame:format=auto:eof_action=repeat[tickbar_raw]`,
+      `[2:v]fps=${fps},scale=${canvasW}:ih[tickbg]`,
+      `[3:v]fps=${fps}[ticktext_in]`,
+      `[tickbg][ticktext_in]overlay@ticktext=x='${tickPos.text.x}':y='${tickPos.text.y}':eval=frame:format=auto:eof_action=repeat[tickbar_raw]`,
       `[tickbar_raw]crop@tick_crop=w=${tickPos.bar.width || canvasW}:h=ih:x=0:y=0,scale@tick_scale=w=iw:h='${initTickH}':eval=frame[tickbar]`,
       // Re-stamp incoming video monotonically from frame count N BEFORE split/overlays so per-clip decoder restarts never jump PTS backward
       `[0:v]setpts=N/(${fps}*TB),fps=${fps},zmq=bind_address=tcp\\\\://127.0.0.1\\\\:${this.zmqPort},split=3[v_full][v_lband_in][v_ashton_in]`,
@@ -711,7 +700,7 @@ export class EncoderService {
 
     // Dual output via tee: local HLS (2s GOP-aligned segments, 6-segment window) + remote RTMP for broadcast playout
     // onfail=ignore preserves local HLS and prevents initial connection jitter from crashing the encoder
-    const teeOutput = `[f=hls:hls_time=2:hls_list_size=6:hls_flags=delete_segments+split_by_time+independent_segments]${hlsManifest}|[onfail=ignore:f=flv:flvflags=no_duration_filesize]${rtmpTarget}`;
+    const teeOutput = `[f=hls:hls_time=2:hls_list_size=6:hls_flags=delete_segments+independent_segments+temp_file]${hlsManifest}|[onfail=ignore:f=flv:flvflags=no_duration_filesize]${rtmpTarget}`;
 
     const ffmpegArgs = [
       '-stats',
@@ -722,8 +711,10 @@ export class EncoderService {
       '-thread_queue_size', '1024',
       '-probesize', '1000000',
       '-analyzeduration', '1500000',
+      // The feeder can decode file-backed assets faster than real time; keep playout aligned to wall clock.
+      '-readrate', '1',
       '-f', 'mpegts', '-i', 'pipe:0',
-      // Overlay graphics with 1fps polling (96% lower CPU than 25fps loops, still instantly responsive)
+      // Reload still images at 1fps; the ticker filter is upsampled to stream fps for smooth motion.
       '-loop', '1', '-thread_queue_size', '128', '-framerate', '1', '-i', this.logoFile,
       '-loop', '1', '-thread_queue_size', '128', '-framerate', '1', '-i', this.tickerBgFile,
       '-loop', '1', '-thread_queue_size', '128', '-framerate', '1', '-i', this.tickerFile,
@@ -759,6 +750,9 @@ export class EncoderService {
       '-ar', '44100',
       '-ac', '2',
       // Dual output via tee
+      // Separate network/file output stalls from the encoder so RTMP backpressure can't freeze HLS.
+      '-use_fifo', '1',
+      '-fifo_options', 'queue_size=250:drop_pkts_on_overflow=1:attempt_recovery=1:recovery_wait_time=2:max_recovery_attempts=0',
       '-f', 'tee',
       teeOutput
     ];
@@ -1406,18 +1400,18 @@ export class EncoderService {
       x0 = Math.max(0, canvasW - w0);
     }
 
-    // Squeezed video bounds (E = 1)
-    let w1 = Math.round((targetW * wp) / 100);
+    // Keep the ticker full-frame width while its vertical position follows the squeeze.
+    let w1 = Math.round((canvasW * wp) / 100);
     if (w1 % 2 !== 0) w1 += 1;
-    w1 = Math.min(targetW, w1);
+    w1 = Math.min(canvasW, w1);
     const mb1 = Math.max(0, Math.round((targetH * mbPercent) / 100));
     const y1 = Math.max(0, targetY + targetH - squeezedTickH - mb1);
 
-    let x1 = targetX;
+    let x1 = 0;
     if (align === 'center') {
-      x1 = targetX + Math.max(0, Math.round((targetW - w1) / 2));
+      x1 = Math.max(0, Math.round((canvasW - w1) / 2));
     } else if (align === 'right') {
-      x1 = targetX + Math.max(0, targetW - w1);
+      x1 = Math.max(0, canvasW - w1);
     }
 
     return {

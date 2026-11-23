@@ -901,6 +901,7 @@ export const updateTickerBranding = async (req, res, next) => {
       fontFamily: currentTicker.fontFamily,
       fontSize: currentTicker.fontSize,
       widthPercent: currentTicker.width,
+      canvasWidth: updatedChannel.outputSettings?.width || 1280,
       paddingY: currentTicker.paddingY,
       alignment: currentTicker.alignment,
       outputPath: targetTickerFile
