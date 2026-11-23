@@ -1,0 +1,29 @@
+import { Router } from 'express';
+import {
+  uploadChunkHandler,
+  uploadDirectHandler,
+  getAssets,
+  getAssetById,
+  deleteAsset,
+  getStorageSummary
+} from '../controllers/asset.controller.js';
+import { auth } from '../middleware/auth.middleware.js';
+import { uploadChunk, uploadDirect } from '../middleware/upload.js';
+
+const router = Router();
+
+router.use(auth);
+
+// Chunked upload
+router.post('/upload/chunk', uploadChunk.single('chunk'), uploadChunkHandler);
+
+// Direct single-file upload
+router.post('/upload/direct', uploadDirect.single('file'), uploadDirectHandler);
+
+// Asset CRUD and storage
+router.get('/', getAssets);
+router.get('/storage/summary', getStorageSummary);
+router.get('/:id', getAssetById);
+router.delete('/:id', deleteAsset);
+
+export default router;

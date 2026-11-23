@@ -1,0 +1,21 @@
+node_modules/
+uploads/
+streams/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+
+# Hide the Readme file
+.md
+.tldr
+.cjs
+
+explanation/
+
+.dockerignore
+Dockerfile
+Dockerfile.dev
+docker-compose*.yml

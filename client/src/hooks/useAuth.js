@@ -1,0 +1,65 @@
+import { toast } from 'react-hot-toast';
+import { useState, useEffect, useCallback } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
+import { loginUser, clearError } from '../store/slices/authSlice.js';
+
+export default function useAuth() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const { isAuthenticated, loading, error } = useSelector((state) => state.auth);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/channels');
+    }
+    return () => {
+      dispatch(clearError());
+    };
+  }, [isAuthenticated, navigate, dispatch]);
+
+  const handleSubmit = useCallback(
+    async (e) => {
+      e.preventDefault();
+
+      try {
+        if (!email || !password) {
+          toast.error('Please fill in both email and password');
+          return;
+        }
+
+        const result = await dispatch(loginUser({ email, password }));
+
+        if (result.payload && result.payload.success) {
+          toast.success(result.payload.message || 'Login successful');
+        }
+      } catch (error) {
+        toast.error(error.message || 'Login failed');
+      }
+    },
+    [email, password, dispatch]
+  );
+
+  const handleQuickLogin = useCallback(
+    (quickEmail) => {
+      setEmail(quickEmail);
+      setPassword(DEFAULT_PASSWORD);
+      dispatch(loginUser({ email: quickEmail, password: DEFAULT_PASSWORD }));
+    },
+    [dispatch]
+  );
+
+  return {
+    email,
+    password,
+    setEmail,
+    setPassword,
+    loading,
+    error,
+    handleSubmit,
+    handleQuickLogin,
+  };
+}

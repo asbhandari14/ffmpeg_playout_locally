@@ -1,0 +1,28 @@
+{
+  "name": "ffmpeg-playout-system",
+  "version": "1.0.0",
+  "description": "Full-stack automated FFmpeg Playout solution with dynamic branding, real-time overlays, and Web UI",
+  "private": true,
+  "scripts": {
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
+    "docker:clean": "docker compose down -v --remove-orphans",
+    "build": "cd client && npm run build",
+    "start": "cd server && npm start",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev"
+  },
+  "keywords": [
+    "ffmpeg",
+    "playout",
+    "streaming",
+    "hls",
+    "rtmp",
+    "docker"
+  ],
+  "author": "",
+  "license": "ISC"
+}
